@@ -71,19 +71,16 @@ class VideoLooper(object):
         # default value to 0 millibels (omxplayer)
         self._sound_vol = 0
         # Initialize trigger playback support
-        self._trigger_support = False
+        self._trigger_supported = False
         if self._config.has_option('video_looper', 'trigger_pin'):
-            self._trigger_support = True
-            self._trigger_pin = self._config.getint('video_looper', 'trigger_pin')
+            self._trigger_supported = True
             GPIO.setmode(GPIO.BOARD)
-            GPIO.setup(self._trigger_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        self._last_trigger  = True
-        self._input_trigger = True
-
-        # Wether to just play once after receiving trigger.
-        self._trigger_play_once = True;
-        if self._config.has_option('video_looper', 'trigger_play_once'):
-            self._trigger_play_once = self._config.getboolean('video_looper', 'trigger_play_once')
+            self._trigger_pin = self._config.getint('video_looper', 'trigger_pin')
+            GPIO.setup(self._trigger_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            GPIO.add_event_detect(self._trigger_pin, GPIO.RISING, callback=_trigger_callback)
+            # Wether to just play once or loop after receiving trigger.
+            self._trigger_plays_once = self._config.getboolean('video_looper', 'trigger_plays_once')
+        self._trigger_detected = False
 
         # Initialize pygame and display a blank screen.
         pygame.display.init()
@@ -97,6 +94,9 @@ class VideoLooper(object):
         self._small_font = pygame.font.Font(None, 50)
         self._big_font   = pygame.font.Font(None, 250)
         self._running    = True
+
+    def _trigger_callback(channel):
+        self._trigger_detected = True
 
     def _print(self, message):
         """Print message to standard output if console output is enabled."""
@@ -173,7 +173,7 @@ class VideoLooper(object):
         # Print message to console with number of movies in playlist.
         message = 'Found {0} movie{1}.'.format(playlist.length(),
             's' if playlist.length() >= 2 else '')
-        if self._trigger_support:
+        if self._trigger_supported:
             message += ' Trigger playback pin {0}.'.format(self._trigger_pin)
         self._print(message)
         # Do nothing else if the OSD is turned off.
@@ -229,11 +229,10 @@ class VideoLooper(object):
         playlist = self._build_playlist()
         self._prepare_to_run_playlist(playlist)
         # Main loop to play videos in the playlist and listen for file changes.
+
         while self._running:
-            # read trigger state
-            if self._trigger_support:
-                self._input_trigger = GPIO.input(self._trigger_pin)
-            if not self._trigger_support or (self._input_trigger != self._last_trigger):
+            if not self._trigger_supported or (_trigger_supported and self._trigger_detected):
+                self._trigger_detected = False # reset trigger state
                 # Load and play a new movie if nothing is playing.
                 if not self._player.is_playing():
                     movie = playlist.get_next()
@@ -241,7 +240,7 @@ class VideoLooper(object):
                         # Start playing the first available movie.
                         self._print('Playing movie: {0}'.format(movie))
                         loop = playlist.length() == 1
-                        if self._trigger_support and self._trigger_play_once:
+                        if self._trigger_supported and self._trigger_plays_once:
                             loop = False
                         self._player.play(movie, loop=loop, vol = self._sound_vol)
             # Check for changes in the file search path (like USB drives added)
@@ -252,8 +251,6 @@ class VideoLooper(object):
                 # Rebuild playlist and show countdown again (if OSD enabled).
                 playlist = self._build_playlist()
                 self._prepare_to_run_playlist(playlist)
-            # save the trigger state
-            self._last_trigger = self._input_trigger
             # Give the CPU some time to do other tasks.
             time.sleep(0.002)
 
