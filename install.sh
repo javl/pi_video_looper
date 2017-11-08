@@ -12,7 +12,7 @@ fi
 echo "Installing dependencies..."
 echo "=========================="
 apt-get update
-apt-get -y install build-essential python-dev python-pip python-pygame supervisor git omxplayer
+apt-get -y install build-essential python-dev python-pip python-pygame supervisor git omxplayer python-rpi.gpio python3-rpi.gpio
 
 echo "Installing hello_video..."
 echo "========================="

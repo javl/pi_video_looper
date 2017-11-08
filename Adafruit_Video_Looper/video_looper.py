@@ -8,6 +8,7 @@ import re
 import sys
 import signal
 import time
+import RPi.GPIO as GPIO
 
 import pygame
 
@@ -54,7 +55,7 @@ class VideoLooper(object):
         # Load other configuration values.
         self._osd = self._config.getboolean('video_looper', 'osd')
         self._is_random = self._config.getboolean('video_looper', 'is_random')
-        # Parse string of 3 comma separated values like "255, 255, 255" into 
+        # Parse string of 3 comma separated values like "255, 255, 255" into
         # list of ints for colors.
         self._bgcolor = map(int, self._config.get('video_looper', 'bgcolor') \
                                              .translate(None, ',') \
@@ -69,6 +70,15 @@ class VideoLooper(object):
         self._sound_vol_file = self._config.get('omxplayer', 'sound_vol_file');
         # default value to 0 millibels (omxplayer)
         self._sound_vol = 0
+        # Initialize trigger playback support
+        self._trigger_support = False
+        if self._config.has_option('video_looper', 'trigger_pin'):
+            self._trigger_support = True
+            self._trigger_pin = self._config.getint('video_looper', 'trigger_pin')
+            GPIO.setmode(GPIO.BOARD)
+            GPIO.setup(self._trigger_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        self._last_trigger  = True
+        self._input_trigger = True
         # Initialize pygame and display a blank screen.
         pygame.display.init()
         pygame.font.init()
@@ -101,11 +111,11 @@ class VideoLooper(object):
 
     def _is_number(iself, s):
         try:
-            float(s) 
+            float(s)
             return True
         except ValueError:
             return False
-    
+
     def _build_playlist(self):
         """Search all the file reader paths for movie files with the provided
         extensions.
@@ -123,7 +133,7 @@ class VideoLooper(object):
                 # key from an OSX computer
                 movies.extend(['{0}/{1}'.format(path.rstrip('/'), x) \
                                for x in os.listdir(path) \
-                               if re.search('\.{0}$'.format(ex), x, 
+                               if re.search('\.{0}$'.format(ex), x,
                                             flags=re.IGNORECASE) and \
                                x[0] is not '.'])
                 # Get the video volume from the file in the usb key
@@ -155,8 +165,10 @@ class VideoLooper(object):
         message if the on screen display is enabled.
         """
         # Print message to console with number of movies in playlist.
-        message = 'Found {0} movie{1}.'.format(playlist.length(), 
+        message = 'Found {0} movie{1}.'.format(playlist.length(),
             's' if playlist.length() >= 2 else '')
+        if self._trigger_support:
+            message += ' Trigger playback pin {0}.'.format(self._trigger_pin)
         self._print(message)
         # Do nothing else if the OSD is turned off.
         if not self._osd:
@@ -212,21 +224,30 @@ class VideoLooper(object):
         self._prepare_to_run_playlist(playlist)
         # Main loop to play videos in the playlist and listen for file changes.
         while self._running:
-            # Load and play a new movie if nothing is playing.
-            if not self._player.is_playing():
-                movie = playlist.get_next()
-                if movie is not None:
-                    # Start playing the first available movie.
-                    self._print('Playing movie: {0}'.format(movie))
-                    self._player.play(movie, loop=playlist.length() == 1, vol = self._sound_vol)
+            # read trigger state
+            if self._trigger_support:
+                self._input_trigger = GPIO.input(self._trigger_pin)
+            if not self._trigger_support or (self._input_trigger != self._last_trigger):
+                # Load and play a new movie if nothing is playing.
+                if not self._player.is_playing():
+                    movie = playlist.get_next()
+                    if movie is not None:
+                        # Start playing the first available movie.
+                        self._print('Playing movie: {0}'.format(movie))
+                        loop = playlist.length() == 1
+                        if self._trigger_support:
+                            loop = False
+                        self._player.play(movie, loop=loop, vol = self._sound_vol)
             # Check for changes in the file search path (like USB drives added)
             # and rebuild the playlist.
             if self._reader.is_changed():
-                self._player.stop(3)  # Up to 3 second delay waiting for old 
+                self._player.stop(3)  # Up to 3 second delay waiting for old
                                       # player to stop.
                 # Rebuild playlist and show countdown again (if OSD enabled).
                 playlist = self._build_playlist()
                 self._prepare_to_run_playlist(playlist)
+            # save the trigger state
+            self._last_trigger = self._input_trigger
             # Give the CPU some time to do other tasks.
             time.sleep(0.002)
 
@@ -236,6 +257,7 @@ class VideoLooper(object):
         if self._player is not None:
             self._player.stop()
         pygame.quit()
+        GPIO.cleanup()
 
 
 # Main entry point.
