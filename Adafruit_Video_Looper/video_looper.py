@@ -65,7 +65,7 @@ class VideoLooper(object):
                                              .split())
 		#Get seconds for countdown from config
         self._countdown_time = self._config.getint('video_looper', 'countdown_time')
-											 
+
         # Load sound volume file name value
         self._sound_vol_file = self._config.get('omxplayer', 'sound_vol_file');
         # default value to 0 millibels (omxplayer)
@@ -79,6 +79,12 @@ class VideoLooper(object):
             GPIO.setup(self._trigger_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         self._last_trigger  = True
         self._input_trigger = True
+
+        # Wether to just play once after receiving trigger.
+        self._trigger_play_once = True;
+        if self._config.has_option('video_looper', 'trigger_play_once'):
+            self._trigger_play_once = self._config.getboolean('video_looper', 'trigger_play_once')
+
         # Initialize pygame and display a blank screen.
         pygame.display.init()
         pygame.font.init()
@@ -235,7 +241,7 @@ class VideoLooper(object):
                         # Start playing the first available movie.
                         self._print('Playing movie: {0}'.format(movie))
                         loop = playlist.length() == 1
-                        if self._trigger_support:
+                        if self._trigger_support and self._trigger_play_once:
                             loop = False
                         self._player.play(movie, loop=loop, vol = self._sound_vol)
             # Check for changes in the file search path (like USB drives added)
